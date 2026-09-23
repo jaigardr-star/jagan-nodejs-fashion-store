@@ -1,0 +1,4 @@
+node_modules/
+public-basic-backup/
+npm-debug.log
+.env
