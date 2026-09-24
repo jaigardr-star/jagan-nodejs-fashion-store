@@ -1,35 +1,11 @@
 pipeline {
     agent any
 
-    options {
-        skipDefaultCheckout(true)
-    }
-
-    environment {
-        IMAGE_NAME = 'jagan-nodejs-fashion-store'
-        IMAGE_TAG = "${BUILD_NUMBER}"
+    tools {
+        nodejs 'NodeJS'
     }
 
     stages {
-        stage('Clean Workspace') {
-            steps {
-                deleteDir()
-            }
-        }
-
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
-
-        stage('Check Versions') {
-            steps {
-                sh 'node --version'
-                sh 'npm --version'
-                sh 'docker --version'
-            }
-        }
 
         stage('Install Dependencies') {
             steps {
@@ -37,44 +13,56 @@ pipeline {
             }
         }
 
-        stage('Validate Application') {
+        stage('SonarQube Scan') {
             steps {
-                sh 'node --check app.js'
-            }
-        }
-
-        stage('SonarQube Analysis') {
-            steps {
-                script {
-                    def scannerHome = tool 'SonarScanner'
-
-                    withSonarQubeEnv('SonarQube') {
+                withSonarQubeEnv('SonarQube') {
+                    script {
+                        def scannerHome = tool 'SonarScanner'
                         sh "${scannerHome}/bin/sonar-scanner"
                     }
                 }
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Quality Gate') {
             steps {
-                sh 'docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .'
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
             }
         }
 
-        stage('Verify Docker Image') {
+        stage('Docker Build') {
             steps {
-                sh 'docker image inspect ${IMAGE_NAME}:${IMAGE_TAG}'
+                sh 'docker build -t jagan-nodejs-fashion-store:latest .'
             }
         }
-    }
 
-    post {
-        success {
-            echo "Pipeline successful. Docker image: ${IMAGE_NAME}:${IMAGE_TAG}"
+        stage('Remove Old Container') {
+            steps {
+                sh 'docker rm -f jagan-fashion-app || true'
+            }
         }
 
-        failure {
-            echo 'Pipeline failed. Check the Jenkins console output.'
+        stage('Deploy') {
+            steps {
+                sh '''
+                    docker run -d \
+                    --name jagan-fashion-app \
+                    -p 3001:3000 \
+                    jagan-nodejs-fashion-store:latest
+                '''
+            }
+        }
+
+        stage('Verify') {
+            steps {
+                sh '''
+                    sleep 5
+                    docker ps --filter name=jagan-fashion-app
+                    curl -f http://localhost:3001/
+                '''
+            }
         }
     }
 }
